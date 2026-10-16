@@ -6,17 +6,9 @@ CPBA-CLIP combines image-conditioned global prompting with patch-conditioned reg
 
 ![CPBA-CLIP framework](figures/Framework.png)
 
-## Contents
+## Quick Start
 
-- [Environment](#environment)
-- [Data Preparation](#data-preparation)
-- [Pre-trained Weights](#pre-trained-weights)
-- [Experiments](#experiments)
-- [Citation](#citation)
-
-## Environment
-
-The reported experiments used Python 3.11, PyTorch 2.10.0, torchvision 0.25.0, and CUDA 12.8. Install the matching PyTorch build first, then install the remaining dependencies:
+### 1. Installation
 
 ```bash
 conda create -n cpba-clip python=3.11 -y
@@ -25,191 +17,63 @@ pip install torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytor
 pip install -r requirements.txt
 ```
 
-For a different CUDA version, install the matching PyTorch/torchvision build from the [official PyTorch installer](https://pytorch.org/get-started/locally/) before installing `requirements.txt`.
+### 2. Dataset and pretrained weights
 
-## Data Preparation
-
-The prepared `dataset/mvisa/` directory is hosted separately and is intentionally not included in this GitHub repository because of its size. The remaining files under `dataset/`, including the dataset conversion and metadata-generation scripts, are included in the repository. Download the prepared `mvisa` package from the following cloud-drive link, then extract it under `dataset/`:
-
-> **Dataset download:** `DATASET_DOWNLOAD_LINK_TO_BE_ADDED`
-
-After extraction, the repository should contain `./dataset/mvisa/`. The package should provide the unified MVTec-AD and VisA data and metadata files used by the training and testing scripts. If you prepare the data from the original MVTec-AD and VisA releases instead, use the scripts already included in `dataset/` and keep the following layout:
+`dataset/mvisa/` and `pretrained_weight/` are not included in this repository. Download the prepared dataset and CLIP checkpoint, then place them as follows (the default backbone is `ViT-L-14-336px.pt`):
 
 ```text
-dataset/mvisa/data/
-├── visa/
-│   └── <category>/
-│       ├── train/<normal-or-defect>/*
-│       ├── test/<normal-or-defect>/*
-│       └── ground_truth/<defect>/*
-├── mvtec/
-│   └── <category>/
-│       ├── train/<normal-or-defect>/*
-│       ├── test/<normal-or-defect>/*
-│       └── ground_truth/<defect>/*
-├── meta_visa.json
-└── meta_mvtec.json
-```
-
-The metadata JSON files must describe image and mask paths relative to `dataset/mvisa/data`. When using the downloadable prepared package, no additional conversion is required. When preparing the data yourself, update the source-dataset paths in the utilities under `dataset/` and run the metadata generation scripts as needed.
-
-For RGB + Depth experiments, place a grayscale depth image next to each RGB image using the same filename stem and the `_depth` suffix, for example `sample.bmp` and `sample_depth.png`. BAN loads these files when `--use_depth True` is enabled. Attribute descriptions are optional text files next to the RGB images with the same stem and a `.txt` extension; enable them with `--use_attribute_text True`.
-
-## Pre-trained Weights
-
-The `pretrained_weight/` directory is not included in this GitHub repository because the checkpoint files are too large. Download the required OpenAI CLIP weights from the following external link, then extract them into the repository root:
-
-> **Pre-trained weights download:** `PRETRAINED_WEIGHTS_DOWNLOAD_LINK_TO_BE_ADDED`
-
-After extraction, the repository should contain the following file for the commands in this README:
-
-```text
+dataset/mvisa/data/                 # MVTec-AD, VisA, metadata, and optional depth files
 pretrained_weight/ViT-L-14-336px.pt
 ```
 
-The commands below use `models/model_configs/ViT-L-14-336.json`. If you download the weights directly from OpenAI instead, place the matching checkpoint at the same path.
+Other files under `dataset/`, including dataset utilities, are included.
 
-## Experiments
+### 3. Training and evaluation
 
-Run commands from the repository root. Training uses all categories in the selected source dataset and validates on the other dataset. Testing evaluates on the target dataset. The commands below cover the two transfer directions used for the component-ablation and modality-comparison experiments.
+Run commands from the repository root. Default dataset and model paths are configured in `train.py` and `test.py`.
 
-### CPG/BAN Ablation
-
-The four settings are the full model, without CPG (`--use_global`), without BAN (`--use_regional`), and without both. These flags disable the corresponding module. When BAN is disabled, regional text embeddings are compared directly with RGB patch features.
-
-The following Bash loop trains all four settings in both transfer directions:
+**CPG/BAN ablation:** use no flag for the full model; `--use_global` disables CPG, and `--use_regional` disables BAN.
 
 ```bash
-for direction in mvtec_to_visa visa_to_mvtec; do
-  if [ "$direction" = "mvtec_to_visa" ]; then
-    source_dataset=mvtec
-    target_dataset=visa
-  else
-    source_dataset=visa
-    target_dataset=mvtec
-  fi
+# MVTec-AD → VisA
+python train.py --dataset mvtec --val_dataset visa --save_path ./exps/mvtec_to_visa/full
+python train.py --dataset mvtec --val_dataset visa --save_path ./exps/mvtec_to_visa/no_cpg --use_global
+python train.py --dataset mvtec --val_dataset visa --save_path ./exps/mvtec_to_visa/no_ban --use_regional
 
-  for setting in full without_cpg without_ban without_cpg_ban; do
-    module_flags=()
-    case "$setting" in
-      without_cpg) module_flags+=(--use_global) ;;
-      without_ban) module_flags+=(--use_regional) ;;
-      without_cpg_ban) module_flags+=(--use_global --use_regional) ;;
-    esac
-
-    python train.py \
-      --dataset "$source_dataset" \
-      --val_dataset "$target_dataset" \
-      --train_data_path ./dataset/mvisa/data \
-      --val_data_path ./dataset/mvisa/data \
-      --save_path "./exps/ablation/${direction}/${setting}" \
-      --pretrained_path ./pretrained_weight/ViT-L-14-336px.pt \
-      --config_path ./models/model_configs/ViT-L-14-336.json \
-      --model ViT-L-14-336 \
-      --use_attribute_text True \
-      "${module_flags[@]}"
-  done
-done
+# VisA → MVTec-AD
+python train.py --dataset visa --val_dataset mvtec --save_path ./exps/visa_to_mvtec/full
+python train.py --dataset visa --val_dataset mvtec --save_path ./exps/visa_to_mvtec/no_cpg --use_global
+python train.py --dataset visa --val_dataset mvtec --save_path ./exps/visa_to_mvtec/no_ban --use_regional
 ```
 
-Test a trained ablation checkpoint. Set `DIRECTION` and `TARGET` for the desired transfer direction, and set `SETTING` to `full`, `without_cpg`, `without_ban`, or `without_cpg_ban`:
+Evaluate a checkpoint with the same dataset and ablation flag used for training:
 
 ```bash
-# MVTec-AD -> VisA
-DIRECTION=mvtec_to_visa
-TARGET=visa
-SETTING=full
-
-# For VisA -> MVTec-AD, use:
-# DIRECTION=visa_to_mvtec
-# TARGET=mvtec
-
-MODULE_FLAGS=()
-case "$SETTING" in
-  without_cpg) MODULE_FLAGS+=(--use_global) ;;
-  without_ban) MODULE_FLAGS+=(--use_regional) ;;
-  without_cpg_ban) MODULE_FLAGS+=(--use_global --use_regional) ;;
-esac
-
-python test.py \
-  --data_path ./dataset/mvisa/data \
-  --dataset "$TARGET" \
-  --checkpoint_path "./exps/ablation/${DIRECTION}/${SETTING}/epoch_15.pth" \
-  --save_path "./results/ablation/${DIRECTION}/${SETTING}" \
-  --pretrained_path ./pretrained_weight/ViT-L-14-336px.pt \
-  --config_path ./models/model_configs/ViT-L-14-336.json \
-  --model ViT-L-14-336 \
-  --use_attribute_text True \
-  "${MODULE_FLAGS[@]}"
+python test.py --dataset visa --checkpoint_path ./exps/mvtec_to_visa/no_ban/epoch_1.pth \
+  --save_path ./results/mvtec_to_visa/no_ban --use_regional
+python test.py --dataset mvtec --checkpoint_path ./exps/visa_to_mvtec/no_ban/epoch_1.pth \
+  --save_path ./results/visa_to_mvtec/no_ban --use_regional
 ```
 
-Replace `epoch_15.pth` with the checkpoint selected by validation when a different epoch is used.
+Replace `epoch_1.pth` with the checkpoint selected for evaluation. To disable both modules, pass `--use_global --use_regional` to both training and testing.
 
-### RGB vs. RGB + Depth
-
-This comparison uses the full CPG + BAN model. The following loop trains RGB-only and RGB + Depth configurations in both transfer directions:
+**RGB vs. RGB + Depth** (example: MVTec-AD → VisA): omit `--use_depth True` for RGB-only runs.
 
 ```bash
-for direction in mvtec_to_visa visa_to_mvtec; do
-  if [ "$direction" = "mvtec_to_visa" ]; then
-    source_dataset=mvtec
-    target_dataset=visa
-  else
-    source_dataset=visa
-    target_dataset=mvtec
-  fi
+python train.py --dataset mvtec --val_dataset visa --save_path ./exps/mvtec_to_visa/rgb
+python test.py --dataset visa --checkpoint_path ./exps/mvtec_to_visa/rgb/epoch_1.pth \
+  --save_path ./results/mvtec_to_visa/rgb
 
-  for modality in rgb rgb_depth; do
-    depth_flag=()
-    if [ "$modality" = "rgb_depth" ]; then
-      depth_flag+=(--use_depth True)
-    fi
-
-    python train.py \
-      --dataset "$source_dataset" \
-      --val_dataset "$target_dataset" \
-      --train_data_path ./dataset/mvisa/data \
-      --val_data_path ./dataset/mvisa/data \
-      --save_path "./exps/modality/${direction}/${modality}" \
-      --pretrained_path ./pretrained_weight/ViT-L-14-336px.pt \
-      --config_path ./models/model_configs/ViT-L-14-336.json \
-      --model ViT-L-14-336 \
-      --use_attribute_text True \
-      "${depth_flag[@]}"
-  done
-done
+python train.py --dataset mvtec --val_dataset visa --save_path ./exps/mvtec_to_visa/rgb_depth --use_depth True
+python test.py --dataset visa --checkpoint_path ./exps/mvtec_to_visa/rgb_depth/epoch_1.pth \
+  --save_path ./results/mvtec_to_visa/rgb_depth --use_depth True
 ```
-
-Evaluate the selected checkpoint with the matching modality setting:
-
-```bash
-# Set these for each run.
-DIRECTION=mvtec_to_visa
-TARGET=visa
-MODALITY=rgb
-
-# For VisA -> MVTec-AD, set DIRECTION=visa_to_mvtec and TARGET=mvtec.
-# For RGB + Depth, set MODALITY=rgb_depth.
-
-DEPTH_FLAG=()
-if [ "$MODALITY" = "rgb_depth" ]; then
-  DEPTH_FLAG+=(--use_depth True)
-fi
-
-python test.py \
-  --data_path ./dataset/mvisa/data \
-  --dataset "$TARGET" \
-  --checkpoint_path "./exps/modality/${DIRECTION}/${MODALITY}/epoch_15.pth" \
-  --save_path "./results/modality/${DIRECTION}/${MODALITY}" \
-  --pretrained_path ./pretrained_weight/ViT-L-14-336px.pt \
-  --config_path ./models/model_configs/ViT-L-14-336.json \
-  --model ViT-L-14-336 \
-  --use_attribute_text True \
-  "${DEPTH_FLAG[@]}"
-```
-
-When testing RGB + Depth, depth files must be available for all evaluated images. Replace `epoch_15.pth` with the selected validation checkpoint when needed.
 
 ## Citation
 
-If you use this code, please cite the CPBA-CLIP paper. Add the final bibliographic entry here once the publication or preprint details are available.
+```bibtex
+@misc{cpba_clip,
+  title = {CPBA-CLIP: A Zero-Shot Industrial Anomaly Detection Model with Context-Aware Prompting and Bidirectional Alignment}
+}
+```
+
