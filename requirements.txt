@@ -1,0 +1,16 @@
+torch==2.10.0
+torchvision==0.25.0
+numpy
+scikit-learn
+scipy
+scikit-image
+tqdm
+albumentations
+Pillow
+opencv-python
+pandas
+pycocotools
+tabulate
+ftfy
+regex
+packaging
