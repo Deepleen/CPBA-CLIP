@@ -69,6 +69,12 @@ python test.py --dataset visa --checkpoint_path ./exps/mvtec_to_visa/rgb_depth/e
   --save_path ./results/mvtec_to_visa/rgb_depth --use_depth True
 ```
 
+## Comparison with State-of-the-art methods
+
+![Comparison results](figures/main_result.png)
+
+Using MVTec-AD and VisA as separate training sources, we added six industrial test datasets and compared CPBA-CLIP with SOTA models using RGB-only. all values are percentages. MVTec, LOCO AD, and AD 2 denote MVTec-AD, MVTec LOCO AD, and MVTec AD 2, respectively.
+
 ## Citation
 
 ```bibtex
